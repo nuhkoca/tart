@@ -1,7 +1,10 @@
 package tart.test
 
 import android.app.AlertDialog
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
@@ -24,10 +27,12 @@ import radiography.Radiography
 import radiography.ScannableView.AndroidView
 import radiography.ViewStateRenderer
 import radiography.ViewStateRenderers.DefaultsIncludingPii
-import tart.legacy.FrozenFrameOnTouchDetector
+import tart.internal.lastFrameTimeNanos
+import tart.isChoreographerDoingFrame
 import tart.legacy.ActivityEvent
 import tart.legacy.AppStart.AppStartData
 import tart.legacy.FrozenFrameOnTouch
+import tart.legacy.FrozenFrameOnTouchDetector
 import tart.legacy.Perfs
 import tart.test.utilities.TestActivity
 import java.util.concurrent.CopyOnWriteArrayList
@@ -144,6 +149,39 @@ class PerfMonitoringTest {
     }
   }
 
+  @Test fun frameTimeNanos_value_for_current_frame() {
+    val frameCallbackLatch = CountDownLatch(1)
+    lateinit var frameTimes: Pair<Long, Long>
+    Choreographer.getInstance().postFrameCallback { frameTimeNanos ->
+      frameTimes = Choreographer.getInstance().lastFrameTimeNanos to frameTimeNanos
+      frameCallbackLatch.countDown()
+    }
+    check(frameCallbackLatch.await(10, SECONDS))
+    assertThat(frameTimes.first).isEqualTo(frameTimes.second)
+  }
+
+  @Test fun Choreographer_is_doing_Frame() {
+    val frameCallbackLatch = CountDownLatch(1)
+    var isChoreographerDoingFrame = false
+    Choreographer.getInstance().postFrameCallback {
+      isChoreographerDoingFrame = isChoreographerDoingFrame()
+      frameCallbackLatch.countDown()
+    }
+    check(frameCallbackLatch.await(10, SECONDS))
+    assertThat(isChoreographerDoingFrame).isTrue()
+  }
+
+  @Test fun Choreographer_not_doing_Frame() {
+    val frameCallbackLatch = CountDownLatch(1)
+    var isChoreographerDoingFrame = false
+    Handler(Looper.getMainLooper()).post {
+      isChoreographerDoingFrame = isChoreographerDoingFrame()
+      frameCallbackLatch.countDown()
+    }
+    check(frameCallbackLatch.await(10, SECONDS))
+    assertThat(isChoreographerDoingFrame).isFalse()
+  }
+
   private fun reportFrozenFrame(): () -> FrozenFrameOnTouch {
     val waitForFrozenFrame = CountDownLatch(1)
     val frozenFrameOnTouchRef = AtomicReference<FrozenFrameOnTouch>()
@@ -154,7 +192,7 @@ class PerfMonitoringTest {
       }
     }
     return {
-      require(waitForFrozenFrame.await(10, SECONDS))
+      check(waitForFrozenFrame.await(10, SECONDS))
       frozenFrameOnTouchRef.get()!!
     }
   }
@@ -184,7 +222,7 @@ class PerfMonitoringTest {
           waitForDialogButton.countDown()
         }
       })
-    require(waitForDialogButton.await(10, SECONDS))
+    check(waitForDialogButton.await(10, SECONDS))
     return dialogButtonCenter.get()!!
   }
 
